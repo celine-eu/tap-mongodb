@@ -1,4 +1,5 @@
 """MongoDB tap class."""
+
 from __future__ import annotations
 
 import collections
@@ -6,7 +7,7 @@ import os
 from typing import Any, Generator, Iterable, MutableMapping
 
 import orjson
-import singer_sdk._singerlib as singer
+
 import singer_sdk.helpers._flattening
 from bson.objectid import ObjectId
 from bson.timestamp import Timestamp
@@ -20,6 +21,12 @@ from singer_sdk.streams.core import (
     REPLICATION_LOG_BASED,
     TypeConformanceLevel,
 )
+
+try:
+    # valid for older version
+    import singer_sdk._singerlib as singer
+except ModuleNotFoundError:
+    import singer_sdk.singerlib as singer
 
 
 def _flatten_record(
@@ -52,11 +59,15 @@ def _flatten_record(
                     new_key,
                     # Override the default json encoder to use orjson
                     # and a string encoder for ObjectIds, etc.
-                    orjson.dumps(
-                        v, default=lambda o: str(o), option=orjson.OPT_OMIT_MICROSECONDS
-                    ).decode("utf-8")
-                    if singer_sdk.helpers._flattening._should_jsondump_value(k, v, flattened_schema)
-                    else v,
+                    (
+                        orjson.dumps(
+                            v, default=lambda o: str(o), option=orjson.OPT_OMIT_MICROSECONDS
+                        ).decode("utf-8")
+                        if singer_sdk.helpers._flattening._should_jsondump_value(
+                            k, v, flattened_schema
+                        )
+                        else v
+                    ),
                 )
             )
     return dict(items)

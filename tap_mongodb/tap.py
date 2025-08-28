@@ -1,4 +1,5 @@
 """MongoDB tap class."""
+
 from __future__ import annotations
 
 import os
@@ -6,23 +7,34 @@ import sys
 
 import orjson
 import genson
-import singer_sdk._singerlib.messages
 import singer_sdk.helpers._typing
-from pathlib import PurePath, Path
+from pathlib import Path
 from typing import Any
 import yaml
 from pymongo.mongo_client import MongoClient
 from singer_sdk import Stream, Tap
 from singer_sdk import typing as th
-from singer_sdk._singerlib.catalog import Catalog, CatalogEntry
 
 from tap_mongodb.collection import CollectionStream, MockCollection
 
 _BLANK = ""
 """A sentinel value to represent a blank value in the config."""
 
+try:
+    # valid for older version
+    import singer_sdk._singerlib.messages
+    from singer_sdk._singerlib.catalog import Catalog, CatalogEntry
+except ModuleNotFoundError:
+    import singer_sdk.singerlib.messages
+    from singer_sdk.singerlib.catalog import Catalog, CatalogEntry
+
+try:
+    from singer_sdk._singerlib import messages as singerlib_messages
+except ModuleNotFoundError:
+    from singer_sdk.singerlib import messages as singerlib_messages
+
 # Monkey patch the singer lib to use orjson
-singer_sdk._singerlib.messages.format_message = lambda message: orjson.dumps(
+singerlib_messages.format_message = lambda message: orjson.dumps(
     message.to_dict(), default=lambda o: str(o), option=orjson.OPT_OMIT_MICROSECONDS
 ).decode("utf-8")
 
@@ -65,9 +77,7 @@ class TapMongoDB(Tap):
         th.Property(
             "mongo_file_location",
             th.StringType,
-            description=(
-                "Optional file path, useful if reading mongo configuration from a file."
-            ),
+            description=("Optional file path, useful if reading mongo configuration from a file."),
             default=_BLANK,
         ),
         th.Property(
