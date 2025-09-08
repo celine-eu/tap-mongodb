@@ -23,6 +23,8 @@ from singer_sdk.singerlib import messages as singerlib_messages
 import singer_sdk.helpers._typing
 from singer_sdk import Tap, typing as th
 
+from functools import lru_cache
+
 _BLANK = ""
 """A sentinel value to represent a blank value in the config."""
 
@@ -33,6 +35,7 @@ singerlib_messages.format_message = lambda message: orjson.dumps(
 ).decode("utf-8")
 
 
+@lru_cache()
 def noop(*args, **kwargs) -> None:
     """No-op function to silence the warning about unmapped properties."""
     pass
@@ -55,6 +58,8 @@ def recursively_drop_required(schema: dict) -> None:
 
 class TapMongoDB(Tap):
     """MongoDB tap class."""
+
+    _catalog_dict: dict[str, Any] = {}
 
     name = "tap-mongodb"
     config_jsonschema = th.PropertiesList(
