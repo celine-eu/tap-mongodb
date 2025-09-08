@@ -1,11 +1,11 @@
 """MongoDB tap class."""
 
 from __future__ import annotations
+import typing as t
 
-import collections
 import os
-from typing import Any, Generator, Iterable, MutableMapping
-
+from typing import Any, Generator, MutableMapping
+from collections.abc import MutableMapping as abc_MutableMapping
 import orjson
 
 import singer_sdk.helpers._flattening
@@ -15,18 +15,16 @@ from pymongo.collection import Collection
 from singer_sdk import Stream
 from singer_sdk.helpers._state import increment_state
 from singer_sdk.helpers._util import utc_now
-from singer_sdk.plugin_base import PluginBase as TapBaseClass
 from singer_sdk.streams.core import (
     REPLICATION_INCREMENTAL,
     REPLICATION_LOG_BASED,
-    TypeConformanceLevel,
 )
+from singer_sdk.helpers._typing import TypeConformanceLevel
+import singer_sdk.singerlib as singer
 
-try:
-    # valid for older version
-    import singer_sdk._singerlib as singer
-except ModuleNotFoundError:
-    import singer_sdk.singerlib as singer
+if t.TYPE_CHECKING:
+    from singer_sdk.helpers.types import Context
+    from singer_sdk.tap_base import Tap
 
 
 def _flatten_record(
@@ -42,7 +40,7 @@ def _flatten_record(
     items: list[tuple[str, Any]] = []
     for k, v in record_node.items():
         new_key = singer_sdk.helpers._flattening.flatten_key(k, parent_key, separator)
-        if isinstance(v, collections.abc.MutableMapping) and level < max_level:
+        if isinstance(v, abc_MutableMapping) and level < max_level:
             items.extend(
                 _flatten_record(
                     v,
@@ -61,7 +59,9 @@ def _flatten_record(
                     # and a string encoder for ObjectIds, etc.
                     (
                         orjson.dumps(
-                            v, default=lambda o: str(o), option=orjson.OPT_OMIT_MICROSECONDS
+                            v,
+                            default=lambda o: str(o),
+                            option=orjson.OPT_OMIT_MICROSECONDS,
                         ).decode("utf-8")
                         if singer_sdk.helpers._flattening._should_jsondump_value(
                             k, v, flattened_schema
@@ -96,26 +96,26 @@ class CollectionStream(Stream):
 
     def __init__(
         self,
-        tap: TapBaseClass,
+        tap: Tap,
         schema: str | os.PathLike | dict[str, Any] | singer.Schema | None = None,
         name: str | None = None,
         *,
         collection: Collection,
     ) -> None:
         """Initialize the stream."""
-        super().__init__(tap=tap, schema=schema, name=name)
+        super().__init__(tap, schema=schema, name=name)
         self._collection = collection
         self._strategy = self.config.get("strategy", "raw")
 
-    def _make_resume_token(oplog_doc: dict):
+    def _make_resume_token(self, oplog_doc: dict):
         """Make a resume token the hard way for Mongo <=3.6
 
         The idea here is to use change streams but there are nuances that don't fit a batch use
         case such as the fact it is a capped collection."""
         rt = b"\x82"
-        rt += oplog_doc["ts"].time.to_bytes(4, byteorder="big") + oplog_doc["ts"].inc.to_bytes(
-            4, byteorder="big"
-        )
+        rt += oplog_doc["ts"].time.to_bytes(4, byteorder="big") + oplog_doc[
+            "ts"
+        ].inc.to_bytes(4, byteorder="big")
         rt += b"\x46\x64\x5f\x69\x64\x00\x64"
         rt += bytes.fromhex(str(oplog_doc["o"]["_id"]))
         rt += b"\x00\x5a\x10\x04"
@@ -129,12 +129,12 @@ class CollectionStream(Stream):
 
         The idea here is to use change streams but there are nuances that don't fit a batch use
         case such as the fact it is a capped collection."""
-        first_record: ObjectId = list(self._collection.find(projection=[]).sort("_id", 1).limit(1))[
-            0
-        ]["_id"]
+        first_record: ObjectId = list(
+            self._collection.find(projection=[]).sort("_id", 1).limit(1)
+        )[0]["_id"]
         return Timestamp(first_record.generation_time, first_record._inc)
 
-    def get_records(self, context: dict | None) -> Iterable[dict]:
+    def get_records(self, context: Context | None) -> t.Iterable[dict]:
         bookmark = self.get_starting_replication_key_value(context)
         for record in self._collection.find(
             {self.replication_key: {"$gt": bookmark}} if bookmark else {}
@@ -162,14 +162,17 @@ class CollectionStream(Stream):
                 yield record_message
 
     def _increment_stream_state(
-        self, latest_record: dict[str, Any], *, context: dict | None = None
+        self, latest_record: dict[str, Any], *, context: Context | None = None
     ) -> None:
         """This override adds error handling for replication key incrementing.
 
         This is useful since a single bad document could otherwise break the stream."""
         state_dict = self.get_context_state(context)
         if latest_record:
-            if self.replication_method in [REPLICATION_INCREMENTAL, REPLICATION_LOG_BASED]:
+            if self.replication_method in [
+                REPLICATION_INCREMENTAL,
+                REPLICATION_LOG_BASED,
+            ]:
                 if not self.replication_key:
                     raise ValueError(
                         f"Could not detect replication key for '{self.name}' stream"
@@ -191,7 +194,7 @@ class CollectionStream(Stream):
                     # Handle the case where the replication key is not in the latest record
                     # since this is a valid case for Mongo
                     if self.config.get("optional_replication_key", False):
-                        self.logger.warn("Failed to increment state. Ignoring...")
+                        self.logger.warning("Failed to increment state. Ignoring...")
                         return
                     raise RuntimeError(
                         "Failed to increment state. Got record %s", latest_record

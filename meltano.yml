@@ -61,24 +61,25 @@ plugins:
         stream_prefix: example_
         # These are all passed directly through to pymongo MongoClient, ie:
         mongo:
-          host: localhost
-          port: 27017
-          directConnection: true
-          readPreference: secondaryPreferred
-          username: mongodb
-          password: mongodb
-          authSource: admin
-          authMechanism: SCRAM-SHA-1
-          tls: true
+          host: mongodb://celine:c3line_2025*@172.17.0.1:27017/celine?directConnection=true
+          # host: localhost
+          # port: 27017
+          # directConnection: true
+          # readPreference: secondaryPreferred
+          # username: mongodb
+          # password: mongodb
+          # authSource: admin
+          # authMechanism: SCRAM-SHA-1
+          # tls: true
       select:
         - "*.*"
-      metadata:
-        # Example of how to set a replication key for a collection
-        # <stream_prefix><db_name>_<collection_name>
-        example_mydb_mycollection:
-          replication-key: lastUpdatedAt
-        example_mydb_myothercollection:
-          replication-key: lastUpdatedAt
+      # metadata:
+      #   # Example of how to set a replication key for a collection
+      #   # <stream_prefix><db_name>_<collection_name>
+      #   example_mydb_mycollection:
+      #     replication-key: lastUpdatedAt
+      #   example_mydb_myothercollection:
+      #     replication-key: lastUpdatedAt
   loaders:
     - name: target-jsonl
       variant: andyh1203

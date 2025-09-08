@@ -7,31 +7,25 @@ import sys
 
 import orjson
 import genson
-import singer_sdk.helpers._typing
+import yaml
+
+import typing as t
+
 from pathlib import Path
 from typing import Any
-import yaml
 from pymongo.mongo_client import MongoClient
-from singer_sdk import Stream, Tap
-from singer_sdk import typing as th
+from pymongo.synchronous.collection import Collection as MongodbCollection
 
 from tap_mongodb.collection import CollectionStream, MockCollection
+
+from singer_sdk.singerlib.catalog import Catalog, CatalogEntry
+from singer_sdk.singerlib import messages as singerlib_messages
+import singer_sdk.helpers._typing
+from singer_sdk import Tap, typing as th
 
 _BLANK = ""
 """A sentinel value to represent a blank value in the config."""
 
-try:
-    # valid for older version
-    import singer_sdk._singerlib.messages
-    from singer_sdk._singerlib.catalog import Catalog, CatalogEntry
-except ModuleNotFoundError:
-    import singer_sdk.singerlib.messages
-    from singer_sdk.singerlib.catalog import Catalog, CatalogEntry
-
-try:
-    from singer_sdk._singerlib import messages as singerlib_messages
-except ModuleNotFoundError:
-    from singer_sdk.singerlib import messages as singerlib_messages
 
 # Monkey patch the singer lib to use orjson
 singerlib_messages.format_message = lambda message: orjson.dumps(
@@ -77,7 +71,9 @@ class TapMongoDB(Tap):
         th.Property(
             "mongo_file_location",
             th.StringType,
-            description=("Optional file path, useful if reading mongo configuration from a file."),
+            description=(
+                "Optional file path, useful if reading mongo configuration from a file."
+            ),
             default=_BLANK,
         ),
         th.Property(
@@ -182,7 +178,9 @@ class TapMongoDB(Tap):
         try:
             client.server_info()
         except Exception as exc:
-            raise RuntimeError("Could not connect to MongoDB to generate catalog") from exc
+            raise RuntimeError(
+                "Could not connect to MongoDB to generate catalog"
+            ) from exc
         db_includes = self.config.get("database_includes", [])
         db_excludes = self.config.get("database_excludes", [])
         for db_name in client.list_database_names():
@@ -226,9 +224,17 @@ class TapMongoDB(Tap):
                 entry.stream = stream_name
                 strategy: str | None = self.config.get("strategy")
                 if strategy == "infer":
-                    builder = genson.SchemaBuilder(schema_uri=None)
+                    builder = genson.SchemaBuilder(schema_uri="NULL")
                     for record in client[db_name][collection].aggregate(
-                        [{"$sample": {"size": self.config.get("infer_schema_max_docs", 2_000)}}]
+                        [
+                            {
+                                "$sample": {
+                                    "size": self.config.get(
+                                        "infer_schema_max_docs", 2_000
+                                    )
+                                }
+                            }
+                        ]
                     ):
                         builder.add_object(
                             orjson.loads(
@@ -286,7 +292,7 @@ class TapMongoDB(Tap):
         self._catalog_dict = catalog.to_dict()
         return self._catalog_dict
 
-    def discover_streams(self) -> list[Stream]:
+    def discover_streams(self):
         """Return a list of discovered streams."""
         if "TAP_MONGO_TEST_NO_DB" in os.environ:
             # This is a hack to allow the tap to be tested without a MongoDB instance
@@ -304,9 +310,12 @@ class TapMongoDB(Tap):
                         },
                         "additionalProperties": True,
                     },
-                    collection=MockCollection(
-                        name="test",
-                        schema={},
+                    collection=t.cast(
+                        MongodbCollection,
+                        MockCollection(
+                            name="test",
+                            schema={},
+                        ),
                     ),
                 )
             ]
@@ -317,11 +326,18 @@ class TapMongoDB(Tap):
             raise RuntimeError("Could not connect to MongoDB") from e
         db_includes = self.config.get("database_includes", [])
         db_excludes = self.config.get("database_excludes", [])
+
+        streams = []
         for entry in self.catalog.streams:
             if entry.database in db_excludes:
                 continue
             if db_includes and entry.database not in db_includes:
                 continue
+
+            if not entry.database or not entry.table:
+                self.logger.warning("Empty database/table, skipping")
+                continue
+
             stream = CollectionStream(
                 tap=self,
                 name=entry.tap_stream_id,
@@ -329,4 +345,6 @@ class TapMongoDB(Tap):
                 collection=client[entry.database][entry.table],
             )
             stream.apply_catalog(self.catalog)
-            yield stream
+            streams.append(stream)
+
+        return streams
